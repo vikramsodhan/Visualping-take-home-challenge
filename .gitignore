@@ -1,0 +1,13 @@
+# Credentials and the target site's address never get committed.
+.env
+.env.local
+
+# Everything the crawler downloads or writes, including the found passwords.
+out/
+
+# Working notes.
+TODO.md
+
+node_modules/
+*.log
+.DS_Store

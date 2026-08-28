@@ -1,0 +1,72 @@
+import { relative, resolve } from 'node:path';
+import { loadConfig, type Config } from './config.ts';
+import { runCrawl } from './crawl/index.ts';
+
+const COMMANDS = ['crawl', 'analyze', 'verify'] as const;
+type CommandName = (typeof COMMANDS)[number];
+
+const USAGE = `Usage: npm run <command>
+
+  crawl     Fetch the site and archive every response byte-for-byte
+  analyze   Search the archived responses for passwords (offline, no requests)
+  verify    Re-crawl and prove nothing new was found
+`;
+
+function parseCommand(argv: string[]): CommandName | null {
+  const candidate = argv[2];
+  return COMMANDS.find((name) => name === candidate) ?? null;
+}
+
+async function main(): Promise<number> {
+  const command = parseCommand(process.argv);
+  if (!command) {
+    process.stderr.write(`${process.argv[2] ? `Unknown command: ${process.argv[2]}\n\n` : ''}${USAGE}`);
+    return 1;
+  }
+
+  const config = loadConfig();
+
+  switch (command) {
+    case 'crawl':
+      return await crawlCommand(config);
+    case 'analyze':
+    case 'verify':
+      process.stdout.write(`"${command}" is not wired up yet — it arrives in a later step.\n`);
+      return 0;
+  }
+}
+
+async function crawlCommand(config: Config): Promise<number> {
+  const summary = await runCrawl(config);
+  const displayPath = (path: string) => relative(process.cwd(), resolve(config.outDir, path));
+
+  process.stdout.write(
+    `Crawled ${summary.urlsRequested} URL(s), archived ${summary.responsesArchived} response(s), ` +
+      `${summary.bytesArchived} bytes.\n\n`,
+  );
+  for (const entry of summary.entries) {
+    const type = entry.contentType?.split(';')[0] ?? 'unknown';
+    process.stdout.write(`  ${entry.status} ${entry.url}\n`);
+    process.stdout.write(
+      `      ${type}, ${entry.byteLength} bytes -> ${displayPath(entry.bodyRelativePath)}\n`,
+    );
+  }
+
+  process.stdout.write(`\nManifest: ${relative(process.cwd(), config.manifestPath)}\n`);
+  if (summary.authFailures > 0) {
+    process.stdout.write(
+      `\nWarning: ${summary.authFailures} response(s) came back 401/403. ` +
+        'Credentials are not reaching every request.\n',
+    );
+  }
+
+  return 0;
+}
+
+main()
+  .then((code) => process.exit(code))
+  .catch((error: unknown) => {
+    // Config and network problems are expected failure modes; a stack trace helps nobody here.
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exit(1);
+  });

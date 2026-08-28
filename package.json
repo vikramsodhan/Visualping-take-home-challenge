@@ -1,0 +1,21 @@
+{
+  "name": "visualping-password-crawler",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser-driven crawler and offline response analyser for the Visualping password hunt",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "crawl": "node --env-file-if-exists=.env src/cli.ts crawl",
+    "analyze": "node --env-file-if-exists=.env src/cli.ts analyze",
+    "verify": "node --env-file-if-exists=.env src/cli.ts verify",
+    "typecheck": "tsc --noEmit",
+    "test": "node --env-file-if-exists=.env --test test/**/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.8.2"
+  }
+}
