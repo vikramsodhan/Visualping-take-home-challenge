@@ -1,6 +1,9 @@
 import { relative, resolve } from 'node:path';
 import { loadConfig, type Config } from './config.ts';
 import { runCrawl } from './crawl/index.ts';
+import { runAnalysis } from './analyze/index.ts';
+import { writeReport } from './analyze/report.ts';
+import { EXPECTED_PASSWORD_COUNT } from './analyze/scan.ts';
 
 const COMMANDS = ['crawl', 'analyze', 'verify'] as const;
 type CommandName = (typeof COMMANDS)[number];
@@ -30,10 +33,48 @@ async function main(): Promise<number> {
     case 'crawl':
       return await crawlCommand(config);
     case 'analyze':
+      return await analyzeCommand(config);
     case 'verify':
       process.stdout.write(`"${command}" is not wired up yet — it arrives in a later step.\n`);
       return 0;
   }
+}
+
+async function analyzeCommand(config: Config): Promise<number> {
+  const result = await runAnalysis(config);
+  const { reportPath } = await writeReport(config, result);
+
+  process.stdout.write(
+    `Searched ${result.artifactsScanned} archived response(s), ${result.viewsScanned} view(s).\n\n`,
+  );
+  process.stdout.write(
+    `Found ${result.confirmedPasswords.length} of ${EXPECTED_PASSWORD_COUNT} passwords.\n\n`,
+  );
+
+  for (const password of result.passwords) {
+    const disputed = result.disputedPasswords.includes(password) ? '  [DISPUTED by the site]' : '';
+    process.stdout.write(`  ${password}${disputed}\n`);
+    for (const finding of result.findings.filter((item) => item.password === password)) {
+      process.stdout.write(
+        `      ${finding.url}\n` +
+          `      ${finding.contentType ?? 'unknown'} · ${finding.decodeChain.join(' -> ')} · offset ${finding.offset}\n`,
+      );
+    }
+  }
+
+  const malformed = result.nearMisses.filter((miss) => miss.kind === 'malformed-password');
+  const mentions = result.nearMisses.length - malformed.length;
+
+  if (malformed.length > 0) {
+    process.stdout.write(
+      `\n${malformed.length} near-miss(es): password-shaped text the pattern rejected.\n` +
+        'Something is still encoded — see the report for where.\n',
+    );
+  }
+  process.stdout.write(`\n${mentions} bare brand mention(s) ignored as prose.\n`);
+
+  process.stdout.write(`\nReport: ${relative(process.cwd(), reportPath)}\n`);
+  return 0;
 }
 
 async function crawlCommand(config: Config): Promise<number> {

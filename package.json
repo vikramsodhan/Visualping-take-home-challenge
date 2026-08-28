@@ -12,7 +12,7 @@
     "analyze": "node --env-file-if-exists=.env src/cli.ts analyze",
     "verify": "node --env-file-if-exists=.env src/cli.ts verify",
     "typecheck": "tsc --noEmit",
-    "test": "node --env-file-if-exists=.env --test test/**/*.test.ts"
+    "test": "node --test \"test/*.test.ts\""
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
