@@ -1,40 +1,67 @@
+import { createHash } from 'node:crypto';
 import type { ArtifactMeta } from '../archive/store.ts';
+import { EXTRACTORS } from './extractors/index.ts';
+import type { View } from './extractors/types.ts';
+
+export type { View } from './extractors/types.ts';
+export { viewText } from './extractors/types.ts';
 
 /**
- * One searchable rendering of an archived response, plus the trail of transformations that
- * produced it. The chain is what lets a finding say *how* a password was hidden — it reads like
- * `response body -> gzip -> base64` once the decoders land.
+ * How many decode layers deep to go. A password is realistically wrapped once or twice
+ * (base64 of a gzip, say); this bound stops a pathological chain of self-similar encodings from
+ * looping, backstopped by the content-hash guard below.
  */
-export interface View {
-  text: string;
-  chain: string[];
-}
+const MAX_DEPTH = 5;
+
+/** Safety cap on views produced from one response, so a hostile input cannot exhaust memory. */
+const MAX_VIEWS = 20_000;
 
 /**
- * Turns one archived response into every text form worth searching.
+ * Turns one archived response into every searchable form it can be decoded into.
  *
- * Today that is the body and the headers. Later steps make this recursive: each view will be fed
- * back through a registry of decoders (decompress, base64, HTML comments, PDF text, font tables),
- * appending a link to `chain` each time, with a depth limit and a content-hash cycle guard.
+ * Starts from two seed views — the raw body and the rendered headers — and repeatedly applies every
+ * extractor, breadth-first, so a password behind several layers (base64 of a char-code array, say)
+ * is peeled open one layer at a time. Each view's provenance chain records the exact route taken.
+ *
+ * Two guards keep it finite: a depth limit, and a content-hash set that drops any view whose bytes
+ * have already been produced. The hash guard is what makes a cyclic or self-referential encoding
+ * safe — the moment a decode reproduces bytes seen before, that branch stops.
  */
 export function expandViews(meta: ArtifactMeta, body: Buffer): View[] {
-  return [bodyView(body), headerView(meta)];
+  const seeds: View[] = [
+    { bytes: body, chain: ['response body'] },
+    { bytes: Buffer.from(renderHeaders(meta), 'utf8'), chain: ['response headers'] },
+  ];
+
+  const produced: View[] = [];
+  const seen = new Set<string>();
+  const queue: Array<{ view: View; depth: number }> = seeds.map((view) => ({ view, depth: 0 }));
+
+  while (queue.length > 0) {
+    const { view, depth } = queue.shift()!;
+
+    const fingerprint = createHash('sha256').update(view.bytes).digest('hex');
+    if (seen.has(fingerprint)) continue;
+    seen.add(fingerprint);
+    produced.push(view);
+
+    if (produced.length >= MAX_VIEWS || depth >= MAX_DEPTH) continue;
+
+    for (const extract of EXTRACTORS) {
+      for (const child of extract(view)) {
+        queue.push({ view: child, depth: depth + 1 });
+      }
+    }
+  }
+
+  return produced;
 }
 
 /**
- * Decodes the body as latin1 rather than utf8 so every byte maps to exactly one character. ASCII
- * survives untouched, string offsets stay equal to byte offsets, and binary files can be swept for
- * embedded text without utf8's replacement characters destroying the very run being searched for.
+ * Renders response headers back into wire form. Headers are a genuine hiding place — one of this
+ * site's passwords lives in an `X-Provisioning-Note` — and the raw pairs preserve the duplicates
+ * and casing a lookup map would have merged away.
  */
-function bodyView(body: Buffer): View {
-  return { text: body.toString('latin1'), chain: ['response body'] };
-}
-
-/**
- * Renders the response headers back into wire form. Headers are a genuine hiding place, and the
- * raw pairs preserve duplicates and casing that a lookup map would have merged away.
- */
-function headerView(meta: ArtifactMeta): View {
-  const text = meta.rawHeaders.map(([name, value]) => `${name}: ${value}`).join('\n');
-  return { text, chain: ['response headers'] };
+function renderHeaders(meta: ArtifactMeta): string {
+  return meta.rawHeaders.map(([name, value]) => `${name}: ${value}`).join('\n');
 }
