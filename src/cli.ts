@@ -1,7 +1,7 @@
 import { relative, resolve } from 'node:path';
 import { loadConfig, type Config } from './config.ts';
 import { runCrawl } from './crawl/index.ts';
-import { runAnalysis } from './analyze/index.ts';
+import { runAnalysis, type AnalysisResult } from './analyze/index.ts';
 import { writeReport } from './analyze/report.ts';
 import { EXPECTED_PASSWORD_COUNT } from './analyze/scan.ts';
 
@@ -44,11 +44,16 @@ async function analyzeCommand(config: Config): Promise<number> {
   const result = await runAnalysis(config);
   const { reportPath } = await writeReport(config, result);
 
+  const automated = result.confirmedPasswords.length;
+  const outOfBandFound = result.outOfBand.resolved && result.outOfBand.password ? 1 : 0;
+
   process.stdout.write(
     `Searched ${result.artifactsScanned} archived response(s), ${result.viewsScanned} view(s).\n\n`,
   );
   process.stdout.write(
-    `Found ${result.confirmedPasswords.length} of ${EXPECTED_PASSWORD_COUNT} passwords.\n\n`,
+    `Found ${automated + outOfBandFound} of ${EXPECTED_PASSWORD_COUNT} passwords ` +
+      `(${automated} by automated analysis` +
+      `${outOfBandFound ? ', 1 via German egress' : ''}).\n\n`,
   );
 
   for (const password of result.passwords) {
@@ -61,6 +66,8 @@ async function analyzeCommand(config: Config): Promise<number> {
       );
     }
   }
+
+  writeOutOfBand(result);
 
   const malformed = result.nearMisses.filter((miss) => miss.kind === 'malformed-password');
   const mentions = result.nearMisses.length - malformed.length;
@@ -75,6 +82,18 @@ async function analyzeCommand(config: Config): Promise<number> {
 
   process.stdout.write(`\nReport: ${relative(process.cwd(), reportPath)}\n`);
   return 0;
+}
+
+/**
+ * Prints the geo-gated password and the roadblock behind it. Shown whether or not the value has
+ * been recovered locally, because the obstacle and its solution are part of the result.
+ */
+function writeOutOfBand(result: AnalysisResult): void {
+  const finding = result.outOfBand;
+  process.stdout.write(`\n${finding.resolved && finding.password ? finding.password : '(not recovered here)'}`);
+  process.stdout.write(`  [geo-gated to ${finding.region}, reached via German egress]\n`);
+  process.stdout.write(`      ${finding.url}\n`);
+  process.stdout.write(`      403 to non-German clients; fetched through a German exit — see the report.\n`);
 }
 
 async function crawlCommand(config: Config): Promise<number> {

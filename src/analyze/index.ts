@@ -8,6 +8,7 @@ import {
   type DiscoveryMethod,
 } from '../archive/store.ts';
 import { findClaim, type SiteClaim } from './claims.ts';
+import { loadGeoGatedFinding, unresolvedGeoGated, type OutOfBandFinding } from './geoGated.ts';
 import { normalizeOcrHex, ocrImages } from './ocr.ts';
 import { findNearMisses, findPasswords, type NearMiss, type NearMissKind } from './scan.ts';
 import { expandViews, viewText } from './views.ts';
@@ -55,6 +56,11 @@ export interface AnalysisResult {
   confirmedPasswords: string[];
   /** Distinct passwords the site claims are not part of the eight, kept visible for review. */
   disputedPasswords: string[];
+  /**
+   * The geo-gated password the automated crawl cannot reach, recovered out of band. Always present
+   * so its roadblock is documented; `resolved` says whether the value was actually recovered.
+   */
+  outOfBand: OutOfBandFinding;
   nearMisses: NearMissReport[];
   artifactsScanned: number;
   viewsScanned: number;
@@ -100,7 +106,7 @@ export async function runAnalysis(config: Config): Promise<AnalysisResult> {
     if (ocr?.text.trim()) input.ocrText = ocr.text;
   }
 
-  return scanArtifacts(inputs);
+  return scanArtifacts(inputs, await loadGeoGatedFinding(config));
 }
 
 /**
@@ -108,7 +114,10 @@ export async function runAnalysis(config: Config): Promise<AnalysisResult> {
  * dedupe so one occurrence is reported once via its most direct decode route. Separated from
  * {@link runAnalysis} so the logic that actually finds passwords needs no archive on disk.
  */
-export function scanArtifacts(inputs: ArtifactInput[]): AnalysisResult {
+export function scanArtifacts(
+  inputs: ArtifactInput[],
+  outOfBand: OutOfBandFinding = unresolvedGeoGated(),
+): AnalysisResult {
   const findings: Finding[] = [];
   const nearMisses: NearMissReport[] = [];
   const byContentType: Record<string, number> = {};
@@ -142,6 +151,7 @@ export function scanArtifacts(inputs: ArtifactInput[]): AnalysisResult {
     passwords,
     confirmedPasswords: passwords.filter((password) => !findClaim(password)),
     disputedPasswords: passwords.filter((password) => findClaim(password) !== null),
+    outOfBand,
     nearMisses: dedupeNearMisses(nearMisses),
     artifactsScanned: inputs.length,
     viewsScanned,

@@ -3,10 +3,10 @@ import { test } from 'node:test';
 import { normalizeOcrHex } from '../src/analyze/ocr.ts';
 
 test('corrects the digit-shaped letters OCR reads inside a password frame', () => {
-  // tesseract reads every 1 as l in a monospace hex string.
+  // tesseract reads 0 as o and 1 as l in a monospace hex string.
   assert.equal(
-    normalizeOcrHex('VISUALPING{elc2e40cf0lcl7cc}'),
-    'VISUALPING{e1c2e40cf01c17cc}',
+    normalizeOcrHex('VISUALPING{ooabcdefll223344}'),
+    'VISUALPING{00abcdef11223344}',
   );
 });
 

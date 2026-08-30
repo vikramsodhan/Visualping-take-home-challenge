@@ -26,9 +26,11 @@ function toJson(result: AnalysisResult) {
   return {
     generatedAt: new Date().toISOString(),
     expectedCount: EXPECTED_PASSWORD_COUNT,
-    foundCount: result.confirmedPasswords.length,
+    automatedCount: result.confirmedPasswords.length,
+    foundCount: result.confirmedPasswords.length + outOfBandCount(result),
     passwords: result.confirmedPasswords,
     disputedPasswords: result.disputedPasswords,
+    outOfBand: result.outOfBand,
     claims: allClaims(),
     findings: result.findings,
     nearMisses: result.nearMisses,
@@ -51,6 +53,8 @@ function renderMarkdown(result: AnalysisResult): string {
     '',
     renderPasswords(result),
     '',
+    renderOutOfBand(result),
+    '',
     renderNearMisses(result),
     '',
     renderClaims(),
@@ -58,6 +62,38 @@ function renderMarkdown(result: AnalysisResult): string {
     renderCoverage(result),
     '',
   ].join('\n');
+}
+
+/**
+ * Documents the one password the automated crawl could not reach and how the roadblock was cleared.
+ * Always rendered — the obstacle and its solution are part of the story whether or not the value
+ * has been recovered on this machine.
+ */
+function renderOutOfBand(result: AnalysisResult): string {
+  const finding = result.outOfBand;
+  const value = finding.resolved
+    ? `Recovered value: \`${finding.password}\``
+    : 'Value not recovered here — this needs a German-origin request (see Resolution). On a fresh ' +
+      'checkout the saved page is absent, which is expected.';
+
+  const lines = [
+    '## Out-of-band: the geo-gated password',
+    '',
+    `One password sits behind \`${finding.url}\`, gated to the ${finding.region} region, so the` +
+      ' automated crawl cannot reach it. It is documented here in full.',
+    '',
+    `**Obstacle.** ${finding.obstacle}`,
+    '',
+    `**Resolution.** ${finding.resolution}`,
+    '',
+    value,
+  ];
+
+  if (finding.resolved && finding.context) {
+    lines.push('', 'Context:', '', '```', finding.context, '```');
+  }
+
+  return lines.join('\n');
 }
 
 /**
@@ -96,16 +132,29 @@ function renderClaims(): string {
 }
 
 function renderScoreline(result: AnalysisResult): string {
-  const found = result.confirmedPasswords.length;
+  const automated = result.confirmedPasswords.length;
+  const outOfBand = outOfBandCount(result);
+  const total = automated + outOfBand;
+
+  const breakdown =
+    outOfBand > 0 ? ` (${automated} by automated analysis, ${outOfBand} via German egress)` : '';
   const verdict =
-    found === EXPECTED_PASSWORD_COUNT
+    total === EXPECTED_PASSWORD_COUNT
       ? 'All accounted for.'
-      : `${EXPECTED_PASSWORD_COUNT - found} still missing.`;
+      : `${EXPECTED_PASSWORD_COUNT - total} still missing.`;
   const disputed =
     result.disputedPasswords.length > 0
       ? ` Plus ${result.disputedPasswords.length} disputed candidate(s) — see Claims below.`
       : '';
-  return `**Found ${found} of ${EXPECTED_PASSWORD_COUNT} passwords.** ${verdict}${disputed}`;
+
+  return `**Found ${total} of ${EXPECTED_PASSWORD_COUNT} passwords${breakdown}.** ${verdict}${disputed}`;
+}
+
+/** 1 when the geo-gated password was recovered and is not already an automated finding, else 0. */
+function outOfBandCount(result: AnalysisResult): number {
+  const { outOfBand } = result;
+  if (!outOfBand.resolved || !outOfBand.password) return 0;
+  return result.confirmedPasswords.includes(outOfBand.password) ? 0 : 1;
 }
 
 function renderPasswords(result: AnalysisResult): string {
