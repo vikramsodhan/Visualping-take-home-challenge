@@ -11,3 +11,6 @@ TODO.md
 node_modules/
 *.log
 .DS_Store
+
+# OCR language model, downloaded by tesseract.js on first run.
+*.traineddata

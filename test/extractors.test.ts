@@ -7,6 +7,9 @@ import { compression } from '../src/analyze/extractors/compression.ts';
 import { hex } from '../src/analyze/extractors/hex.ts';
 import { htmlEntities } from '../src/analyze/extractors/htmlEntities.ts';
 import { percentEncoding } from '../src/analyze/extractors/percentEncoding.ts';
+import { pngTextChunks } from '../src/analyze/extractors/pngChunks.ts';
+import { trailingBytes } from '../src/analyze/extractors/trailingBytes.ts';
+import { utf16Text } from '../src/analyze/extractors/utf16.ts';
 import { viewText, type View } from '../src/analyze/extractors/types.ts';
 
 const PASSWORD = 'VISUALPING{0123456789abcdef}';
@@ -71,3 +74,36 @@ test('extractors that do not apply return nothing', () => {
   assert.deepEqual(htmlEntities(plain), []);
   assert.deepEqual(compression(plain), []);
 });
+
+test('utf-16le decodes text that latin1 reads as null-separated (the EXIF trick)', () => {
+  const utf16 = Buffer.from(PASSWORD, 'utf16le'); // V\0I\0S\0...
+  assertDecodesTo(utf16Text(seed(utf16)), 'utf-16le');
+});
+
+test('utf-16 extractor stays quiet on plain ascii (no printable run after decode)', () => {
+  assert.deepEqual(utf16Text(seed('this is ordinary ascii text with no utf-16 in it')), []);
+});
+
+test('png tEXt chunk text is extracted', () => {
+  const png = pngWithTextChunk('tEXt', Buffer.concat([Buffer.from('Comment\0'), Buffer.from(PASSWORD)]));
+  assertDecodesTo(pngTextChunks(seed(png)), 'png tEXt');
+});
+
+test('trailing bytes after JPEG EOI are surfaced', () => {
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xd9]), Buffer.from(PASSWORD)]);
+  assertDecodesTo(trailingBytes(seed(jpeg)), 'trailing bytes (after JPEG EOI)');
+});
+
+test('trailing-bytes extractor stays quiet on a clean image', () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0x00, 0x11, 0xff, 0xd9]);
+  assert.deepEqual(trailingBytes(seed(jpeg)), []);
+});
+
+/** Builds a minimal valid-enough PNG carrying one metadata chunk, for the chunk-walker to parse. */
+function pngWithTextChunk(type: string, data: Buffer): Buffer {
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  const crc = Buffer.alloc(4); // the walker does not verify CRCs
+  return Buffer.concat([signature, length, Buffer.from(type), data, crc]);
+}

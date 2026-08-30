@@ -19,18 +19,20 @@ const MAX_VIEWS = 20_000;
 /**
  * Turns one archived response into every searchable form it can be decoded into.
  *
- * Starts from two seed views — the raw body and the rendered headers — and repeatedly applies every
- * extractor, breadth-first, so a password behind several layers (base64 of a char-code array, say)
- * is peeled open one layer at a time. Each view's provenance chain records the exact route taken.
+ * Starts from the raw body, the rendered headers, and any caller-supplied extra seeds (image OCR
+ * text, for one), then repeatedly applies every extractor, breadth-first, so a password behind
+ * several layers (base64 of a char-code array, say) is peeled open one layer at a time. Each view's
+ * provenance chain records the exact route taken.
  *
  * Two guards keep it finite: a depth limit, and a content-hash set that drops any view whose bytes
  * have already been produced. The hash guard is what makes a cyclic or self-referential encoding
  * safe — the moment a decode reproduces bytes seen before, that branch stops.
  */
-export function expandViews(meta: ArtifactMeta, body: Buffer): View[] {
+export function expandViews(meta: ArtifactMeta, body: Buffer, extraSeeds: View[] = []): View[] {
   const seeds: View[] = [
     { bytes: body, chain: ['response body'] },
     { bytes: Buffer.from(renderHeaders(meta), 'utf8'), chain: ['response headers'] },
+    ...extraSeeds,
   ];
 
   const produced: View[] = [];

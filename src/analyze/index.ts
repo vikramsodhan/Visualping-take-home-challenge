@@ -8,8 +8,10 @@ import {
   type DiscoveryMethod,
 } from '../archive/store.ts';
 import { findClaim, type SiteClaim } from './claims.ts';
+import { normalizeOcrHex, ocrImages } from './ocr.ts';
 import { findNearMisses, findPasswords, type NearMiss, type NearMissKind } from './scan.ts';
 import { expandViews, viewText } from './views.ts';
+import type { View } from './extractors/types.ts';
 
 /**
  * One password, found in one place, with everything needed to judge it: where it came from, what
@@ -61,10 +63,12 @@ export interface AnalysisResult {
   byContentType: Record<string, number>;
 }
 
-/** One archived response ready to scan: its metadata and its bytes. */
+/** One archived response ready to scan: its metadata, its bytes, and any text OCR read from it. */
 export interface ArtifactInput {
   meta: ArtifactMeta;
   body: Buffer;
+  /** Text recognised from an image's pixels, when this artifact is an image. */
+  ocrText?: string;
 }
 
 /**
@@ -86,6 +90,16 @@ export async function runAnalysis(config: Config): Promise<AnalysisResult> {
   for (const entry of entries) {
     inputs.push(await readArtifact(resolve(config.outDir, entry.metaRelativePath)));
   }
+
+  const ocrByHash = await ocrImages(
+    inputs.map((input) => ({ contentType: input.meta.contentType, body: input.body })),
+    resolve(config.outDir, 'ocr-cache.json'),
+  );
+  for (const input of inputs) {
+    const ocr = ocrByHash.get(input.meta.sha256);
+    if (ocr?.text.trim()) input.ocrText = ocr.text;
+  }
+
   return scanArtifacts(inputs);
 }
 
@@ -101,13 +115,13 @@ export function scanArtifacts(inputs: ArtifactInput[]): AnalysisResult {
   let viewsScanned = 0;
   let bytesScanned = 0;
 
-  for (const { meta, body } of inputs) {
+  for (const { meta, body, ocrText } of inputs) {
     bytesScanned += body.byteLength;
 
     const type = meta.contentType?.split(';')[0]?.trim() ?? 'unknown';
     byContentType[type] = (byContentType[type] ?? 0) + 1;
 
-    for (const view of expandViews(meta, body)) {
+    for (const view of expandViews(meta, body, ocrSeeds(ocrText))) {
       viewsScanned += 1;
       const text = viewText(view);
 
@@ -170,6 +184,25 @@ function keepShortestChain<T extends { decodeChain: string[] }>(
     }
   }
   return [...best.values()];
+}
+
+/**
+ * Turns an image's OCR text into seed views: the raw recognition, and — when the OCR misread a
+ * password's hex as digit-shaped letters — a hex-normalized copy that recovers the exact value.
+ * The raw view is kept so a genuine misread still surfaces as a near-miss rather than vanishing.
+ */
+function ocrSeeds(ocrText: string | undefined): View[] {
+  if (!ocrText?.trim()) return [];
+
+  const seeds: View[] = [{ bytes: Buffer.from(ocrText, 'utf8'), chain: ['image pixels (OCR)'] }];
+  const normalized = normalizeOcrHex(ocrText);
+  if (normalized !== ocrText) {
+    seeds.push({
+      bytes: Buffer.from(normalized, 'utf8'),
+      chain: ['image pixels (OCR)', 'ocr hex-normalized'],
+    });
+  }
+  return seeds;
 }
 
 /** Reconstructs an artifact's path within the archive from its recorded filename. */
