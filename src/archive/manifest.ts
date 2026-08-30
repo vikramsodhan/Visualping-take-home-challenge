@@ -32,6 +32,57 @@ export interface Manifest {
 
 const MANIFEST_VERSION = 1;
 
+/** One URL that a second crawl saw differently from the baseline. */
+export interface ChangedEntry {
+  key: string;
+  url: string;
+  baselineSha256: string;
+  freshSha256: string;
+}
+
+/**
+ * How a second, independent crawl compared to the baseline. `newKeys` is the one that matters for
+ * completeness: a URL the re-crawl reached that the first crawl never did means the first crawl was
+ * not complete. `missing` catches transient fetch failures, and `changed` flags content that moved
+ * under us (expected only on genuinely dynamic pages).
+ */
+export interface ManifestDiff {
+  newKeys: string[];
+  missing: string[];
+  changed: ChangedEntry[];
+  unchanged: number;
+}
+
+/**
+ * Compares a fresh crawl against the baseline it should reproduce. Returns exactly what differs, so
+ * `verify` can turn it into a pass/fail completeness verdict rather than an assertion.
+ */
+export function diffManifests(baseline: Manifest, fresh: Manifest): ManifestDiff {
+  const diff: ManifestDiff = { newKeys: [], missing: [], changed: [], unchanged: 0 };
+
+  for (const [key, entry] of Object.entries(fresh.entries)) {
+    const before = baseline.entries[key];
+    if (!before) {
+      diff.newKeys.push(key);
+    } else if (before.sha256 !== entry.sha256) {
+      diff.changed.push({
+        key,
+        url: entry.url,
+        baselineSha256: before.sha256,
+        freshSha256: entry.sha256,
+      });
+    } else {
+      diff.unchanged += 1;
+    }
+  }
+
+  for (const key of Object.keys(baseline.entries)) {
+    if (!fresh.entries[key]) diff.missing.push(key);
+  }
+
+  return diff;
+}
+
 /**
  * Identity of a manifest row. Capture method is part of the key because one URL can legitimately
  * appear twice — once raw-fetched, once as the body the browser saw.

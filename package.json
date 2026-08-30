@@ -12,7 +12,8 @@
     "analyze": "node --env-file-if-exists=.env src/cli.ts analyze",
     "verify": "node --env-file-if-exists=.env src/cli.ts verify",
     "typecheck": "tsc --noEmit",
-    "test": "node --test \"test/*.test.ts\""
+    "test": "node --test \"test/*.test.ts\"",
+    "check-secrets": "bash scripts/check-secrets.sh"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

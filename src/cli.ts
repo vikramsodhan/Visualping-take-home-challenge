@@ -1,6 +1,7 @@
 import { relative, resolve } from 'node:path';
 import { loadConfig, type Config } from './config.ts';
 import { runCrawl } from './crawl/index.ts';
+import { runVerify } from './crawl/verify.ts';
 import { runAnalysis, type AnalysisResult } from './analyze/index.ts';
 import { writeReport } from './analyze/report.ts';
 import { EXPECTED_PASSWORD_COUNT } from './analyze/scan.ts';
@@ -35,9 +36,35 @@ async function main(): Promise<number> {
     case 'analyze':
       return await analyzeCommand(config);
     case 'verify':
-      process.stdout.write(`"${command}" is not wired up yet — it arrives in a later step.\n`);
-      return 0;
+      return await verifyCommand(config);
   }
+}
+
+async function verifyCommand(config: Config): Promise<number> {
+  process.stdout.write('Re-crawling from the seed to check the archive is complete...\n\n');
+  const { crawl, diff, complete } = await runVerify(config);
+
+  process.stdout.write(
+    `Independent re-crawl: ${crawl.urlsRequested} URL(s), ${crawl.responsesArchived} response(s).\n\n`,
+  );
+  process.stdout.write(`  new URLs:        ${diff.newKeys.length}\n`);
+  process.stdout.write(`  missing URLs:    ${diff.missing.length}\n`);
+  process.stdout.write(`  changed content: ${diff.changed.length}\n`);
+  process.stdout.write(`  unchanged:       ${diff.unchanged}\n`);
+
+  for (const key of diff.newKeys) process.stdout.write(`    NEW      ${key}\n`);
+  for (const key of diff.missing) process.stdout.write(`    MISSING  ${key}\n`);
+  if (diff.changed.length > 0) {
+    process.stdout.write('\n  Content changed (expected only on pages generated on demand):\n');
+    for (const change of diff.changed) process.stdout.write(`    ${change.url}\n`);
+  }
+
+  process.stdout.write(
+    complete
+      ? '\nComplete: the re-crawl reached the same set of URLs. No page was missed.\n'
+      : '\nINCOMPLETE: the re-crawl differs — see NEW/MISSING above.\n',
+  );
+  return complete ? 0 : 1;
 }
 
 async function analyzeCommand(config: Config): Promise<number> {

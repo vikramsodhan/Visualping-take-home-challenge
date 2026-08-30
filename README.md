@@ -24,9 +24,12 @@ cp .env.example .env   # then fill in BASE_URL, BASIC_AUTH_USER, BASIC_AUTH_PASS
 | --- | --- |
 | `npm run crawl` | Fetches the site and archives every response, headers included, into `out/` |
 | `npm run analyze` | Searches the archived responses for passwords. No network access |
-| `npm run verify` | Re-crawls and reports whether anything new was found |
+| `npm run verify` | Runs a second independent crawl and proves it reached the same set of URLs |
+| `npm run check-secrets` | Fails if the site address or any real password would be committed |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm test` | Unit tests |
+
+The first `analyze` run downloads a ~15 MB OCR language model (tesseract.js); later runs reuse it.
 
 ## How it works
 
