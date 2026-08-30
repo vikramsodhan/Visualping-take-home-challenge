@@ -1,9 +1,16 @@
 import { resolve } from 'node:path';
+import { DEFAULT_PAGINATION_SAMPLE } from './crawl/frontier.ts';
 
 /** Tunables that shape network behaviour, all overridable from `.env`. */
 export interface CrawlLimits {
   requestTimeoutMs: number;
   maxRedirects: number;
+  /** Pause between fetches, to stay a polite guest on someone else's server. */
+  requestDelayMs: number;
+  /** Hard stop on archived responses, so a misjudged scope rule cannot run away. */
+  maxPages: number;
+  /** Pages to sample from any one numeric-parameter pagination sequence before bounding it. */
+  paginationSample: number;
 }
 
 /** Everything the tool needs to run, resolved once at startup from the environment. */
@@ -62,6 +69,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     limits: {
       requestTimeoutMs: readPositiveInt(env.REQUEST_TIMEOUT_MS, 30_000),
       maxRedirects: readPositiveInt(env.MAX_REDIRECTS, 10),
+      requestDelayMs: readNonNegativeInt(env.REQUEST_DELAY_MS, 100),
+      maxPages: readPositiveInt(env.MAX_PAGES, 700),
+      paginationSample: readPositiveInt(env.PAGINATION_SAMPLE, DEFAULT_PAGINATION_SAMPLE),
     },
   };
 }
@@ -97,10 +107,20 @@ function parseBaseUrl(raw: string): URL {
 }
 
 function readPositiveInt(raw: string | undefined, fallback: number): number {
+  const parsed = readInt(raw, fallback);
+  if (parsed <= 0) throw new Error(`Expected a positive integer, got "${raw}"`);
+  return parsed;
+}
+
+function readNonNegativeInt(raw: string | undefined, fallback: number): number {
+  const parsed = readInt(raw, fallback);
+  if (parsed < 0) throw new Error(`Expected zero or a positive integer, got "${raw}"`);
+  return parsed;
+}
+
+function readInt(raw: string | undefined, fallback: number): number {
   if (!raw?.trim()) return fallback;
   const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new Error(`Expected a positive integer, got "${raw}"`);
-  }
+  if (!Number.isFinite(parsed)) throw new Error(`Expected an integer, got "${raw}"`);
   return parsed;
 }

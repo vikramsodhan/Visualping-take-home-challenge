@@ -79,29 +79,72 @@ async function analyzeCommand(config: Config): Promise<number> {
 
 async function crawlCommand(config: Config): Promise<number> {
   const summary = await runCrawl(config);
-  const displayPath = (path: string) => relative(process.cwd(), resolve(config.outDir, path));
 
   process.stdout.write(
     `Crawled ${summary.urlsRequested} URL(s), archived ${summary.responsesArchived} response(s), ` +
-      `${summary.bytesArchived} bytes.\n\n`,
+      `${summary.bytesArchived.toLocaleString('en-US')} bytes.\n` +
+      `Rendered ${summary.pagesRendered} HTML page(s) in the browser.\n\n`,
   );
-  for (const entry of summary.entries) {
-    const type = entry.contentType?.split(';')[0] ?? 'unknown';
-    process.stdout.write(`  ${entry.status} ${entry.url}\n`);
+
+  process.stdout.write('Discovered by:\n');
+  for (const [method, count] of sortedEntries(summary.byDiscoveryMethod)) {
+    process.stdout.write(`  ${count.toString().padStart(4)}  ${method}\n`);
+  }
+
+  process.stdout.write('\nCandidates not queued:\n');
+  for (const [reason, count] of sortedEntries(summary.rejections)) {
+    process.stdout.write(`  ${count.toString().padStart(4)}  ${reason}\n`);
+  }
+
+  if (summary.stoppedAtLimit) {
     process.stdout.write(
-      `      ${type}, ${entry.byteLength} bytes -> ${displayPath(entry.bodyRelativePath)}\n`,
+      `\nINCOMPLETE: stopped at the ${config.limits.maxPages}-response cap with ` +
+        `${summary.leftUnvisited} URL(s) still queued. Raise MAX_PAGES and re-run — this crawl ` +
+        'proves nothing about what was left unvisited.\n',
     );
+  } else {
+    process.stdout.write('\nFrontier emptied: every reachable URL was fetched.\n');
+  }
+
+  if (summary.renderFailures.length > 0) {
+    process.stdout.write(
+      `\nWarning: ${summary.renderFailures.length} page(s) failed to render, so their links were never seen:\n`,
+    );
+    for (const failure of summary.renderFailures) {
+      process.stdout.write(`  ${failure.url}\n      ${failure.error}\n`);
+    }
+  }
+
+  const problems = summary.entries.filter((entry) => entry.status >= 400);
+  if (problems.length > 0) {
+    process.stdout.write(`\n${problems.length} response(s) with an error status:\n`);
+    for (const entry of problems) {
+      process.stdout.write(`  ${entry.status} ${entry.url}\n`);
+    }
+  }
+
+  if (summary.unauthorized.length > 0) {
+    process.stdout.write(
+      `\nBUG: ${summary.unauthorized.length} response(s) came back 401. ` +
+        'Credentials are not reaching every request:\n',
+    );
+    for (const entry of summary.unauthorized) process.stdout.write(`  ${entry.url}\n`);
+  }
+
+  if (summary.forbidden.length > 0) {
+    process.stdout.write(
+      `\n${summary.forbidden.length} response(s) came back 403. Not necessarily an auth problem — ` +
+        'read the archived body to see why access was refused:\n',
+    );
+    for (const entry of summary.forbidden) process.stdout.write(`  ${entry.url}\n`);
   }
 
   process.stdout.write(`\nManifest: ${relative(process.cwd(), config.manifestPath)}\n`);
-  if (summary.authFailures > 0) {
-    process.stdout.write(
-      `\nWarning: ${summary.authFailures} response(s) came back 401/403. ` +
-        'Credentials are not reaching every request.\n',
-    );
-  }
-
   return 0;
+}
+
+function sortedEntries(tally: Record<string, number>): Array<[string, number]> {
+  return Object.entries(tally).sort(([, a], [, b]) => b - a);
 }
 
 main()
